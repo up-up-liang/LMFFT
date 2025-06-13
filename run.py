@@ -1,14 +1,19 @@
-from data import *
-from train_eval import *
+# -*- coding: utf-8 -*-
+import time
 import os
 import sys
-from dataclasses import dataclass, field
+
 from typing import Optional
-import time
+from dataclasses import dataclass, field
 from transformers import HfArgumentParser, set_seed
 
+from util.data import *
+from train_eval import *
+import torch
+from model import LMFFT
+
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-model_name_or_path = "../model_file/esm2_t33_650M_UR50D-finetuned-secondary-structure"
+model_name_or_path = "./pretrained_model/esm2_t33_650M_UR50D-finetuned-secondary-structure"
 
 @dataclass
 class Arguments:
@@ -21,14 +26,10 @@ class Arguments:
     model_name_or_path: str = field(
         default=model_name_or_path,
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"})
-    save_model_path: str = field(
-        default=None, metadata={"help": ""})
 
     """
     train learning argument
     """
-    bert_lr: Optional[int] = field(
-        default=0.001, metadata={"help": "Syn type number"})
     weight_decay: Optional[int] = field(
         default=0.3, metadata={"help": "Syn type number"})
     learning_rate: Optional[float] = field(
@@ -38,17 +39,15 @@ class Arguments:
     device: Optional[str] = field(
         default="cuda", metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"})
 
-    dataset: Optional[int] = field(
-        default=1, metadata={"help": ""})
-
     """
     Arguments for training and eval.
     """
-    # dataset 1
+    dataset: Optional[int] = field(
+        default=1, metadata={"help": "Dataset number, 1 for Dataset1, 2 for Dataset2, 3 for Dataset3"})
     train_file: Optional[str] = field(
-        default="../data/Dataset1_train.tsv", metadata={"help": "The input training data file (a csv or JSON file)."})
+        default=None, metadata={"help": "The input training data file (a csv or JSON file)."})
     test_file: Optional[str] = field(
-        default="../data/Dataset1_test.tsv",
+        default=None,
         metadata={"help": "An optional input test data file to predict on (a csv or JSON file)."}, )
 
     dipeptide_file: Optional[str] = field(
@@ -70,7 +69,9 @@ class Arguments:
     epochs: int = field(
         default=100, metadata={"help": "epochs size"})
     do_train: Optional[bool] = field(
-        default=True, metadata={"help": "do train"})
+        default=False, metadata={"help": "do train"})
+    do_eval: Optional[bool] = field(
+        default=False, metadata={"help": "do eval"})
     do_predict: Optional[bool] = field(
         default=False, metadata={"help": "do predict"})
     threshold: Optional[float] = field(
@@ -88,13 +89,10 @@ class Arguments:
         default=None, metadata={"help": "window size"})
     logit: Optional[int] = field(
         default=2, metadata={"help": ""})
-    best_model_result: Optional[bool] = field(
-        default=False, metadata={"help": ""})
     save_fature: Optional[bool] = field(
         default=False, metadata={"help": ""})
     save_feature_name: Optional[str] = field(
         default=None, metadata={"help": ""})
-    
     conv_mode: Optional[int] = field(
         default=1, metadata={"help": ""})
     dim: int = field(
@@ -102,7 +100,6 @@ class Arguments:
 
     ablation_mode: Optional[int] = field(
         default=1, metadata={"help": ""})
-
 
 def main():
     parser = HfArgumentParser(Arguments)
@@ -113,35 +110,28 @@ def main():
         # 从命令行中分配参数
         args = parser.parse_args_into_dataclasses()[0]
 
-    if args.dataset == 1:
-        # args.train_file = "../data/Dataset1_train.tsv"
-        args.train_file = "../data/Dataset1_train_cut.tsv"
-        args.test_file = "../data/Dataset1_test.tsv"
-    elif args.dataset == 2:
-        args.train_file = "../data/Dataset2_train.tsv"
-        args.test_file = "../data/Dataset2_test.tsv"
-    elif args.dataset == 3:
-        args.train_file = "../data/Dataset1_train.tsv"
-        args.test_file = "../data/Dataset1_test.tsv"
+    args.train_file = f"./data/Dataset{args.dataset}_train.tsv"
+    args.test_file = f"./data/Dataset{args.dataset}_test.tsv"
 
     set_seed(args.seed)
     raw_datasets = process(args)
 
-    if args.log_file is None:
-        args.log_file = f"./logs/{time.localtime().tm_mon}-{time.localtime().tm_mday}.txt"
-    if not args.log_file.endswith(".txt"):
-        args.log_file = f"./logs/{args.log_file}.txt"
-
-    # Training
+    # train
     if args.do_train:
-        checkpoint = None
         if args.kfold == None:
             train(args, raw_datasets)
         else:
             train_kfold(args, raw_datasets)
-    
-    if args.best_model_result:
-        best_model_result(args, raw_datasets)
+
+    # eval
+    if args.do_eval:
+        # 创建模型对象
+        model = LMFFT(args).to(args.device)
+        model.model.embeddings.position_embeddings = None
+        state_dict = torch.load(f"./pkls/save_model_Dataset{args.dataset}.pkl")
+        model.load_state_dict(state_dict)
+        model.eval()
+        eval(args, model, raw_datasets["test"])
 
 if __name__ == "__main__":
     main()

@@ -68,15 +68,8 @@ def caculate_metric(pred_y, labels, pred_prob):
     fpr, tpr, thresholds = roc_curve(labels, pred_prob, pos_label=1)  # 默认1就是阳性
     AUC = auc(fpr, tpr)
 
-    # PRC and AP
-    precision, recall, thresholds = precision_recall_curve(labels, pred_prob, pos_label=1)
-    AP = average_precision_score(labels, pred_prob, average='macro', pos_label=1, sample_weight=None)
-
     metric = [ACC, Precision, Sensitivity, Specificity, F1, AUC, MCC, tp, fp, tn, fn]
-
-    roc_data = [fpr, tpr, AUC]
-    prc_data = [recall, precision, AP]
-    return metric, roc_data, prc_data
+    return metric
 
 
 # draw ROC

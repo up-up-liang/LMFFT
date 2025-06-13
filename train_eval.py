@@ -1,32 +1,27 @@
-import pathlib
-import torch
+# -*- coding: utf-8 -*-
+import gc
+import json
 import time
-import random
+import pathlib
+
+import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import pandas as pd
 import numpy as np
-from tabulate import tabulate
-from tqdm import tqdm, trange
-import torch.nn.functional as F
 from transformers import AdamW
 from rich.progress import track
+from tabulate import tabulate
 from sklearn.model_selection import KFold
-from util.util_metric import caculate_metric
-import gc
+from loguru import logger
+
 from model import LMFFT
-from data import DataIterator
-import json
-import pickle
-
-rewrite_print = print
-
-log_file = None
-
+from util.data import DataIterator
+from util.util_metric import caculate_metric
 
 def get_bert_optimizer(args, model):
     optimizer = AdamW(model.parameters(), eps=1e-8, lr=args.learning_rate, weight_decay=1e-5)
     return optimizer
-
 
 class FocalLoss(nn.Module):
     def __init__(self, gama=1.5, alpha=0.9375, weight=None, reduction="mean") -> None:
@@ -115,8 +110,6 @@ def get_loss(logits, label, criterion):
     return loss
 
 def train(args, raw_datasets):
-    global log_file
-    log_file = pathlib.Path(args.log_file)
     print(f'time: { time.strftime("%Y - %m - %d %H : %M : %S") }')
 
     # 加载 train - test 数据集
@@ -133,11 +126,12 @@ def train(args, raw_datasets):
     best_mcc = 0
     best_metric = []
 
+    # 创建模型对象
     model = LMFFT(args).to(args.device)
     model.model.embeddings.position_embeddings = None
 
-    print(model, vis=False)
-    print(args, vis=False)
+    print(model)
+    print(args)
     optimizer = get_bert_optimizer(args, model)
     criterion = nn.CrossEntropyLoss(weight=torch.FloatTensor([1, args.weight])).to(args.device)
     
@@ -145,6 +139,7 @@ def train(args, raw_datasets):
     gc.collect()
     if args.fgm:
         fgm = FGM(model=model, emb_name="word_embeddings", epsilon=1)
+    
     for epoch in range(1, args.epochs + 1):
         model.train()
         epoch_loss = 0
@@ -153,12 +148,11 @@ def train(args, raw_datasets):
         print(f"Training {epoch} epoch:")
         for i in track(range(train_set.sample_num)):
             input_ids, target = train_set.get_index(i)
-            output_prob1 = model.forward(input_ids)
-            
+            output_prob = model.forward(input_ids)
             target = target.reshape([-1]).long()
 
             # loss
-            loss_ce = get_loss(output_prob1, target, criterion)
+            loss_ce = get_loss(output_prob, target, criterion)
             loss_ce.backward()
             # FGM
             if args.fgm:
@@ -179,7 +173,7 @@ def train(args, raw_datasets):
             best_mcc = MCC
             best_metric = [ACC, Precision, Sensitivity, Specificity, F1, AUC, MCC, tp, fp, tn, fn]
             if args.save_model_path is not None:
-                torch.save(model.state_dict(), f"./pkls/{args.save_model_path}.pkl")
+                torch.save(model.state_dict(), f"./pkls/save_model_Dataset{str(args.dataset)}.pkl")
 
     print("Best indicator:")
     header = ["ACC", "Precision", "Sensitivity", "Specificity", "F1-score", "AUC", "MCC", "tp", "fp", "tn", "fn"]
@@ -188,20 +182,15 @@ def train(args, raw_datasets):
          best_metric[7], best_metric[8], best_metric[9], best_metric[10]),
     ]
     print(tabulate(rows, headers=header))
-    print(args, vis=False, file=True)
-    print(tabulate(rows, headers=header), vis=False, file=True)
     print(f"The training takes {(time.time() - train_start) // 60} minutes\n\n")
 
 def train_kfold(args, raw_datasets):
-    global log_file
-    
-    log_file = pathlib.Path(args.log_file)
     print(f'time: { time.strftime("%Y - %m - %d %H : %M : %S") }')
 
     kf = KFold(n_splits=args.kfold, shuffle=True, random_state=args.seed)
     criterion = nn.CrossEntropyLoss(weight=torch.FloatTensor([1, args.weight])).to(args.device)
 
-    print(args, vis=False)
+    print(args)
     for fold, (train_index, val_index) in enumerate(kf.split(raw_datasets['train_input_ids'])):
         print("\n========== Fold " + str(fold + 1) + " ==========")
 
@@ -256,7 +245,7 @@ def train_kfold(args, raw_datasets):
                 best_mcc = MCC
                 best_metric = [ACC, Precision, Sensitivity, Specificity, F1, AUC, MCC, tp, fp, tn, fn]
                 if args.save_model_path is not None:
-                    torch.save(model.state_dict(), f"./pkls/hyper_experiment/fold_{args.save_model_path}_{fold}.pkl")
+                    torch.save(model.state_dict(), f"./pkls/save_model_Dataset{args.dataset}_{fold}.pkl")
 
         print("test:")
         header = ["ACC", "Precision", "Sensitivity", "Specificity", "F1-score", "AUC", "MCC", "tp", "fp", "tn", "fn"]
@@ -265,7 +254,7 @@ def train_kfold(args, raw_datasets):
             best_metric[7], best_metric[8], best_metric[9], best_metric[10]),
         ]
         print(tabulate(rows, headers=header))
-        print(tabulate(rows, headers=header), vis=False, file=True)
+        print(tabulate(rows, headers=header), file=True)
         print(f"The training takes {(time.time() - train_start) // 60} minutes\n\n")
 
     label_pred = []
@@ -280,7 +269,6 @@ def train_kfold(args, raw_datasets):
 
         model = LMFFT(args).to(args.device)
         model.load_state_dict()       # 加载训练好的模型pkl文件
-
         model.model.embeddings.position_embeddings = None
         
         for i in range(valid_set.sample_num):
@@ -304,7 +292,7 @@ def train_kfold(args, raw_datasets):
 
             input_ids, target = None, None
 
-    metric, roc_data, prc_data = caculate_metric(label_pred, targets, pred_prob)
+    metric = caculate_metric(label_pred, targets, pred_prob)
     ACC, Precision, Sensitivity, Specificity, F1, AUC, MCC, tp, fp, tn, fn = metric
 
     print("test:")
@@ -314,7 +302,7 @@ def train_kfold(args, raw_datasets):
         best_metric[7], best_metric[8], best_metric[9], best_metric[10]),
     ]
     print(tabulate(rows, headers=header))
-    print(tabulate(rows, headers=header), vis=False, file=True)
+    print(tabulate(rows, headers=header), file=True)
     print(f"The training takes {(time.time() - train_start) // 60} minutes\n\n")
 
 
@@ -345,7 +333,7 @@ def eval(args, model, test_set):
 
         input_ids, target = None, None
 
-    metric, roc_data, prc_data = caculate_metric(label_pred, targets, pred_prob)
+    metric = caculate_metric(label_pred, targets, pred_prob)
     ACC, Precision, Sensitivity, Specificity, F1, AUC, MCC, tp, fp, tn, fn = metric
 
     header = ["ACC", "Precision", "Sensitivity", "Specificity", "F1-score", "AUC", "MCC", "tp", "fp", "tn", "fn"]
@@ -358,16 +346,37 @@ def eval(args, model, test_set):
     return ACC, Precision, Sensitivity, Specificity, F1, AUC, MCC, tp, fp, tn, fn
 
 
-def print(content, vis=True, file=False):
-    global log_file
+def model_eval(args, raw_datasets):
+    # 加载测试集
+    tst_input_ids = raw_datasets["test_input_ids"]
+    tst_labels = raw_datasets["test_labels"]
+    test_set = DataIterator(args, tst_input_ids, tst_labels)
+    
+    # 创建模型对象
+    model = LMFFT(args).to(args.device)
+    model.model.embeddings.position_embeddings = None
 
-    if file == False:
-        file = log_file
-    else:
-        file = pathlib.Path(f"./logs/best_Metric.txt")
+    # 加载参数
+    state_dict = torch.load("./pkls/" + args.save_model_path + ".pkl")
+    model.load_state_dict(state_dict)
+    model.eval()
+    
+    # 测试集试验
+    label_pred = []
+    pred_prob = []
+    targets = []
+    for i in track(range(test_set.sample_num)):
+        input_ids, target = test_set.get_index(i)
+        out_pred = model.forward(input_ids)
 
-    if vis:
-        rewrite_print(content) # 打印到控制台
+        # out_pred = F.softmax(out_pred, dim=-1)
+        out_pred = out_pred.sigmoid().reshape([-1, 2])
+        
+        label_p = torch.argmax(out_pred, dim=-1).squeeze(0).cpu().detach().numpy()
+        out_pred = out_pred[:, :].cpu().detach().numpy()
+        
+        target = target.reshape([-1]).long().cpu().detach().numpy()
 
-    with open(file, "a", encoding='utf-8') as f:
-        rewrite_print(content, file=f)
+        label_pred.append(label_p.tolist())              # 预测label
+        pred_prob.append(out_pred.tolist())              # 预测的概率包含 0 1
+        targets.append(target.tolist())                  # 真实label
