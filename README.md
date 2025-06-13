@@ -42,7 +42,7 @@ python run.py --do_train --dataset <dataset_num: 1, 2, 3>
 ```
 
 - Model Testing:
-下载模型并将其放置在 ./pkls 目录中。<br>Download the model and place it in the ./pkls directory.
+下载[模型](https://drive.google.com/drive/folders/1Vrf7G1rzmW5sezYpwwTAHnXbLHT2R5P3?usp=drive_link)并将其放置在 ./pkls 目录中。<br>Download the [model](https://drive.google.com/drive/folders/1Vrf7G1rzmW5sezYpwwTAHnXbLHT2R5P3?usp=drive_link) and place it in the ./pkls directory.
 ```python
 python run.py --eval --dataset <dataset_num: 1, 2, 3>
 ```
