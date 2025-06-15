@@ -29,9 +29,7 @@ To run the code in this repository, you'll need the following dependencies:
 
 
 ## 🤖 Download  🤖
-Before training and testing, you need to download the dataset and place it in the `./data directory`.
-
-Before executing the code, you need to download the pre-trained model [esm2_t33_650M_UR50D-finetuned-secondary-structure](https://huggingface.co/gaodrew/esm2_t33_650M_UR50D-finetuned-secondary-structure) , pubmedbert and place them in the ./pretrained_model directory.
+Before executing the code, you need to download the pre-trained model [esm2_t33_650M_UR50D-finetuned-secondary-structure](https://huggingface.co/gaodrew/esm2_t33_650M_UR50D-finetuned-secondary-structure) and place it in the ./pretrained_model directory.
 
 ## ⚡️ Running the Code  ⚡️
 - Model Training:
